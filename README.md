@@ -175,6 +175,92 @@ attachments/           ← Anexos (base64 via API)
 
 > Cada registro é um arquivo `.yaml` independente, editável diretamente pelo GitHub se necessário.
 
+## Changelog
+
+### v0.4β — 21 de abril de 2026 (versão atual estável)
+
+#### Refinamentos UX na topbar mobile
+
+#### Correções
+
+Logo e título do app alinhados à esquerda na topbar fixa mobile, agrupados junto ao botão hambúrguer — layout idêntico ao padrão adotado no pqLAB
+
+---
+
+### v0.35β — 5 de abril de 2026 · DOI [10.5281/zenodo.19434100](https://doi.org/10.5281/zenodo.19434100)
+
+#### Dark mode e melhorias de layout mobile
+
+#### Novas funcionalidades
+
+Dark mode completo com alternância persistente (`ThemeContext` + `localStorage`); padrão light; toggle na sidebar (desktop) e na topbar (mobile)
+
+Topbar fixa na versão mobile: hambúrguer à esquerda, logo e nome ao centro, botão Sun/Moon à direita — elimina sobreposição ao conteúdo das páginas
+
+Subtítulo do login atualizado: "App de gestão acadêmica · por coLAB/UFF"
+
+`INSTALL.md` reescrito com guia de instalação via fork: Fork → Ativar Pages → Criar repositório privado de dados → Gerar PAT → Fazer login
+
+#### Correções
+
+Dark mode: causa raiz de texto branco em fundo branco era a ausência de variantes `dark:` nos componentes base do shadcn/ui — corrigido em `card.tsx`, `dialog.tsx`, `input.tsx`, `textarea.tsx`, `select.tsx`, `label.tsx`, `badge.tsx` e `institution-selector.tsx`, propagando o fix automaticamente para todos os módulos
+
+`Nucleacao.tsx`: removidas importações `CardHeader` e `CardTitle` não utilizadas que causavam erro TS6133 no build de produção
+
+---
+
+### v0.2β — 29 de março de 2026 · DOI [10.5281/zenodo.19305492](https://doi.org/10.5281/zenodo.19305492)
+
+#### Consolidação de módulos e identidade visual
+
+#### Novas funcionalidades
+
+Novo favicon SVG com ícone `FlaskConical` (Lucide) — identidade visual do SucupiraLAB
+
+Screenshots atualizados para todos os 7 módulos, removendo referências ao módulo Submissões
+
+README revisado com descrições detalhadas de cada módulo e badge de DOI Zenodo
+
+#### Mudanças estruturais
+
+Módulo **Submissões** removido do SucupiraLAB e migrado para o aplicativo irmão **pqLAB**, onde o quadro Kanban de acompanhamento de manuscritos foi adaptado e expandido. O SucupiraLAB passa a focar exclusivamente na gestão acadêmica e administrativa do programa
+
+---
+
+### v0.1β — 17 de março de 2026 · DOI [10.5281/zenodo.19058248](https://doi.org/10.5281/zenodo.19058248)
+
+#### Lançamento inicial
+
+Primeira versão pública do SucupiraLAB. Plataforma web estática (React 19 + TypeScript + Vite 7 + Tailwind CSS v4) com armazenamento direto em repositório GitHub privado do próprio usuário via GitHub Contents API (YAML + anexos em base64). Sem banco de dados externo, sem servidor próprio.
+
+#### Módulos
+
+**Prestações de Contas**: registro de projetos financiados com tabela de despesas, documentos comprobatórios em anexo e exportação PDF/XLS
+
+**Discursos Qualificados**: catalogação de produtos e participações públicas de alto impacto social ou institucional com links de comprovação
+
+**Projetos Financiados**: cadastro de projetos com equipe, agências financiadoras, editais, valores e vigência
+
+**Orientações**: acompanhamento de orientandos com diário de reuniões em Markdown, controle de tarefas e documentos anexados
+
+**Produção Científica**: importação direta do currículo Lattes (HTML) via parser client-side, com categorização por tipo de publicação e badges Qualis
+
+**Nucleação**: registro da inserção profissional de egressos (mestres, doutores, pós-doutores) em instituições e bolsas de fomento
+
+**Internacionalização**: catalogação de projetos e cooperações internacionais, parcerias com instituições estrangeiras e financiamentos
+
+#### Infraestrutura
+
+Backend-less: dados armazenados diretamente no repositório GitHub do usuário (sem servidor)
+
+Autenticação via Personal Access Token (PAT) do GitHub
+
+Modo demonstração sem necessidade de configuração
+
+Deploy estático via GitHub Actions → GitHub Pages (ativado por fork do repositório)
+
+Licença GPL-3.0
+
 ---
 
 *SucupiraLAB — App de gestão acadêmica · um projeto desenvolvido por [coLAB/UFF](https://colab-uff.github.io/)*
