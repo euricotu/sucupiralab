@@ -167,7 +167,21 @@ export async function uploadAnexo(
 ): Promise<Anexo> {
   const c = cfg()
   const filePath = `attachments/${entityType}/${entityId}/${file.name}`
-  const result = await writeBinaryFile(c, filePath, file, `Upload ${file.name}`)
+
+  // If the file already exists the GitHub API requires its SHA to update it.
+  // Check the cache first to avoid an extra round-trip on the happy path.
+  let existingSha = shaCache.get(filePath)
+  if (!existingSha) {
+    try {
+      const existing = await readFile(c, filePath)
+      existingSha = existing.sha
+      shaCache.set(filePath, existingSha)
+    } catch {
+      // File doesn't exist yet — no SHA needed for creation.
+    }
+  }
+
+  const result = await writeBinaryFile(c, filePath, file, `Upload ${file.name}`, existingSha)
   shaCache.set(filePath, result.content.sha)
   return {
     id: crypto.randomUUID(),
