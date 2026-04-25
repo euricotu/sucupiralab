@@ -66,7 +66,8 @@ type StoredPrestacao = {
   total_recursos?: number
   created_at: string
   updated_at: string
-  anexo?: StoredAnexo
+  anexo?: StoredAnexo   // legacy — kept for backward-compat when reading old YAMLs
+  anexos?: StoredAnexo[]
   despesas: StoredDespesa[]
 }
 
@@ -178,6 +179,32 @@ export async function uploadAnexo(
   }
 }
 
+/**
+ * Fetch a binary attachment from GitHub via the Contents API (uses the stored PAT).
+ * Returns a Blob so the file can be displayed inline without exposing raw GitHub URLs.
+ */
+export async function fetchAttachment(filePath: string): Promise<{ blob: Blob; name: string }> {
+  const c = cfg()
+  const data = await readFile(c, filePath)
+  const clean = data.content.replace(/\n/g, '')
+  const binStr = atob(clean)
+  const bytes = new Uint8Array(binStr.length)
+  for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i)
+  const ext = filePath.split('.').pop()?.toLowerCase() ?? ''
+  const mimeMap: Record<string, string> = {
+    pdf: 'application/pdf',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    svg: 'image/svg+xml',
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  }
+  return { blob: new Blob([bytes], { type: mimeMap[ext] ?? 'application/octet-stream' }), name: data.name }
+}
+
 // ─── PRESTAÇÕES ───────────────────────────────────────────────────────────
 
 export async function loadPrestacoes(): Promise<{
@@ -191,7 +218,10 @@ export async function loadPrestacoes(): Promise<{
   const despesas: Despesa[] = []
 
   for (const doc of docs) {
-    const anexos = doc.anexo ? [storedToAnexo(doc.anexo)] : []
+    // Support legacy `anexo` (singular) and new `anexos` (array)
+    const anexos = doc.anexos
+      ? doc.anexos.map(storedToAnexo)
+      : doc.anexo ? [storedToAnexo(doc.anexo)] : []
     prestacoes.push({ ...doc, user_id: GH_USER, anexos })
     for (const d of doc.despesas ?? []) {
       const dAnexos = (d.anexos ?? []).map(storedToAnexo)
@@ -219,7 +249,7 @@ export async function savePrestacaoFile(
     total_recursos: prestacao.total_recursos,
     created_at: prestacao.created_at,
     updated_at: new Date().toISOString(),
-    anexo: prestacao.anexos?.[0] ? anexoToStored(prestacao.anexos[0]) : undefined,
+    anexos: (prestacao.anexos ?? []).map(anexoToStored),
     despesas: myDespesas.map((d) => ({
       id: d.id,
       descricao: d.descricao,

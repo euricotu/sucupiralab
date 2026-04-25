@@ -12,6 +12,7 @@ import { Orientacoes } from '@/pages/Orientacoes'
 import { Nucleacao } from '@/pages/Nucleacao'
 import { Producao } from '@/pages/Producao'
 import { Internacionalizacao } from '@/pages/Internacionalizacao'
+import { FileViewer } from '@/pages/FileViewer'
 import { NotFound } from '@/pages/NotFound'
 
 const queryClient = new QueryClient({
@@ -26,6 +27,11 @@ export default function App() {
         <HashRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/file/*" element={
+              <ProtectedRoute>
+                <FileViewer />
+              </ProtectedRoute>
+            } />
             <Route
               element={
                 <ProtectedRoute>

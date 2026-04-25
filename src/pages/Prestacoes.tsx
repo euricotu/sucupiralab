@@ -15,7 +15,6 @@ import { Badge } from '@/components/ui/badge'
 import { ToastContainer } from '@/components/ui/toast'
 import type { Prestacao, Despesa, Anexo } from '@/types'
 
-// Export helpers
 import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -24,6 +23,13 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** Returns a URL to open the file via the in-app FileViewer (authenticated). Falls back to blob URL for demo mode. */
+function fileViewerUrl(anexo: Anexo): string {
+  if (!anexo.path) return anexo.url
+  const base = window.location.href.split('#')[0]
+  return `${base}#/file/${anexo.path}`
 }
 
 function exportPDF(prestacoes: Prestacao[]) {
@@ -81,27 +87,30 @@ export function Prestacoes() {
   const [loading, setLoading] = useState(!isDemoMode)
   const [expanded, setExpanded] = useState<string | null>(null)
 
-  // Prestação form state
+  // Prestação form
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Prestacao | null>(null)
   const [form, setForm] = useState(emptyPrestacao)
 
-  // Despesa form state
+  // Despesa form
   const [showDespesaForm, setShowDespesaForm] = useState(false)
   const [despesaForm, setDespesaForm] = useState(emptyDespesa)
   const [currentPrestacaoId, setCurrentPrestacaoId] = useState<string | null>(null)
+  const [editingDespesa, setEditingDespesa] = useState<Despesa | null>(null)
 
-  // File attachment state — Maps keyed by entity id
+  // Attachment maps keyed by entity id
   const [prestacaoAnexos, setPrestacaoAnexos] = useState<Map<string, Anexo[]>>(new Map())
   const [despesaAnexos, setDespesaAnexos] = useState<Map<string, Anexo[]>>(new Map())
 
-  // Pending attachments while form is open
-  const [pendingAnexo, setPendingAnexo] = useState<Anexo | null>(null)
-  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  // Pending attachments while forms are open
+  // Existing files (from GitHub) have `path` set; newly picked files don't.
+  // pendingPrestacaoFiles / pendingDespesaFiles hold only the *new* File objects,
+  // parallel to the pending anexos that lack `path`.
+  const [pendingPrestacaoAnexos, setPendingPrestacaoAnexos] = useState<Anexo[]>([])
+  const [pendingPrestacaoFiles, setPendingPrestacaoFiles] = useState<File[]>([])
   const [pendingDespesaAnexos, setPendingDespesaAnexos] = useState<Anexo[]>([])
   const [pendingDespesaFiles, setPendingDespesaFiles] = useState<File[]>([])
 
-  // Despesa panel — track which despesa's file list is expanded
   const [expandedDespesaFiles, setExpandedDespesaFiles] = useState<string | null>(null)
 
   const prestacaoFileRef = useRef<HTMLInputElement>(null)
@@ -128,13 +137,33 @@ export function Prestacoes() {
   const totalRecursos = prestacoes.reduce((s, p) => s + (p.total_recursos ?? 0), 0)
   const totalDespesas = despesas.reduce((s, d) => s + d.valor, 0)
 
-  // --- Prestação CRUD ---
+  // ── Helpers for removing pending files ──────────────────────────────────
+
+  function removePrestacaoAnexo(index: number) {
+    const a = pendingPrestacaoAnexos[index]
+    if (!a.path) {
+      const newFileIdx = pendingPrestacaoAnexos.slice(0, index).filter(x => !x.path).length
+      setPendingPrestacaoFiles(prev => prev.filter((_, i) => i !== newFileIdx))
+    }
+    setPendingPrestacaoAnexos(prev => prev.filter((_, i) => i !== index))
+  }
+
+  function removeDespesaAnexo(index: number) {
+    const a = pendingDespesaAnexos[index]
+    if (!a.path) {
+      const newFileIdx = pendingDespesaAnexos.slice(0, index).filter(x => !x.path).length
+      setPendingDespesaFiles(prev => prev.filter((_, i) => i !== newFileIdx))
+    }
+    setPendingDespesaAnexos(prev => prev.filter((_, i) => i !== index))
+  }
+
+  // ── Prestação CRUD ───────────────────────────────────────────────────────
 
   function openNew() {
     setEditing(null)
     setForm(emptyPrestacao)
-    setPendingAnexo(null)
-    setPendingFile(null)
+    setPendingPrestacaoAnexos([])
+    setPendingPrestacaoFiles([])
     setShowForm(true)
   }
 
@@ -150,30 +179,28 @@ export function Prestacoes() {
       vigencia_fim: p.vigencia_fim ?? '',
       total_recursos: p.total_recursos,
     })
-    // Show existing attachment as pending so the user can see/replace it
-    const existing = prestacaoAnexos.get(p.id)
-    setPendingAnexo(existing?.[0] ?? null)
-    setPendingFile(null)
+    setPendingPrestacaoAnexos(prestacaoAnexos.get(p.id) ?? [])
+    setPendingPrestacaoFiles([])
     setShowForm(true)
   }
 
   function handlePrestacaoFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const url = URL.createObjectURL(file)
-    const anexo: Anexo = { id: crypto.randomUUID(), name: file.name, size: file.size, url, type: file.type }
-    setPendingAnexo(anexo)
-    setPendingFile(file)
-    // reset input so same file can be re-selected
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0) return
+    const newAnexos: Anexo[] = files.map(file => ({
+      id: crypto.randomUUID(), name: file.name, size: file.size,
+      url: URL.createObjectURL(file), type: file.type,
+    }))
+    setPendingPrestacaoAnexos(prev => [...prev, ...newAnexos])
+    setPendingPrestacaoFiles(prev => [...prev, ...files])
     e.target.value = ''
   }
 
   async function handleSave() {
     if (!form.titulo.trim()) { toast({ title: 'Título obrigatório', variant: 'destructive' }); return }
 
-    let savedId: string | null = null
-
     if (isDemoMode) {
+      let savedId: string
       if (editing) {
         setPrestacoes(prev => prev.map(p => p.id === editing.id ? { ...p, ...form, updated_at: new Date().toISOString() } : p))
         savedId = editing.id
@@ -182,22 +209,26 @@ export function Prestacoes() {
         setPrestacoes(prev => [newP, ...prev])
         savedId = newP.id
       }
-      if (savedId && pendingAnexo) {
-        setPrestacaoAnexos(prev => { const next = new Map(prev); next.set(savedId!, [pendingAnexo]); return next })
+      if (pendingPrestacaoAnexos.length > 0) {
+        setPrestacaoAnexos(prev => { const next = new Map(prev); next.set(savedId, pendingPrestacaoAnexos); return next })
       }
     } else {
       const now = new Date().toISOString()
       const id = editing ? editing.id : crypto.randomUUID()
-      let savedAnexo: Anexo | undefined = pendingAnexo ?? undefined
-      if (pendingFile) {
-        savedAnexo = await uploadAnexo('prestacoes', id, pendingFile)
+      const existingAnexos = pendingPrestacaoAnexos.filter(a => a.path)
+      let newUploaded: Anexo[] = []
+      if (pendingPrestacaoFiles.length > 0) {
+        try {
+          newUploaded = await Promise.all(pendingPrestacaoFiles.map(f => uploadAnexo('prestacoes', id, f)))
+        } catch (err: any) {
+          toast({ title: 'Erro ao fazer upload', description: err.message, variant: 'destructive' }); return
+        }
       }
+      const allAnexos = [...existingAnexos, ...newUploaded]
       const prestacao: Prestacao = {
-        id,
-        user_id: 'github-user',
-        ...form,
+        id, user_id: 'github-user', ...form,
         total_recursos: form.total_recursos ? Number(form.total_recursos) : undefined,
-        anexos: savedAnexo ? [savedAnexo] : [],
+        anexos: allAnexos,
         created_at: editing?.created_at ?? now,
         updated_at: now,
       }
@@ -207,10 +238,7 @@ export function Prestacoes() {
         toast({ title: 'Erro ao salvar', description: err.message, variant: 'destructive' }); return
       }
       setPrestacoes(prev => editing ? prev.map(p => p.id === id ? prestacao : p) : [prestacao, ...prev])
-      if (savedAnexo) {
-        setPrestacaoAnexos(prev => { const next = new Map(prev); next.set(id, [savedAnexo!]); return next })
-      }
-      savedId = id
+      setPrestacaoAnexos(prev => { const next = new Map(prev); next.set(id, allAnexos); return next })
     }
 
     toast({ title: editing ? 'Prestação atualizada' : 'Prestação criada' })
@@ -235,41 +263,79 @@ export function Prestacoes() {
     toast({ title: 'Prestação removida' })
   }
 
-  // --- Despesa CRUD ---
+  // ── Despesa CRUD ─────────────────────────────────────────────────────────
 
   function handleDespesaFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? [])
     if (files.length === 0) return
     const newAnexos: Anexo[] = files.map(file => ({
-      id: crypto.randomUUID(),
-      name: file.name,
-      size: file.size,
-      url: URL.createObjectURL(file),
-      type: file.type,
+      id: crypto.randomUUID(), name: file.name, size: file.size,
+      url: URL.createObjectURL(file), type: file.type,
     }))
     setPendingDespesaAnexos(prev => [...prev, ...newAnexos])
     setPendingDespesaFiles(prev => [...prev, ...files])
     e.target.value = ''
   }
 
+  function openNewDespesa(prestacaoId: string) {
+    setEditingDespesa(null)
+    setCurrentPrestacaoId(prestacaoId)
+    setDespesaForm(emptyDespesa)
+    setPendingDespesaAnexos([])
+    setPendingDespesaFiles([])
+    setShowDespesaForm(true)
+  }
+
+  function openEditDespesa(d: Despesa) {
+    setEditingDespesa(d)
+    setCurrentPrestacaoId(d.prestacao_id)
+    setDespesaForm({
+      descricao: d.descricao, data: d.data, valor: d.valor,
+      numero_nota_fiscal: d.numero_nota_fiscal ?? '',
+      prestador_servico: d.prestador_servico ?? '',
+    })
+    setPendingDespesaAnexos(despesaAnexos.get(d.id) ?? [])
+    setPendingDespesaFiles([])
+    setShowDespesaForm(true)
+  }
+
   async function handleSaveDespesa() {
     if (!despesaForm.descricao.trim()) { toast({ title: 'Descrição obrigatória', variant: 'destructive' }); return }
 
     if (isDemoMode) {
-      const nd: Despesa = { id: crypto.randomUUID(), user_id: 'demo-user-id', prestacao_id: currentPrestacaoId!, ...despesaForm, valor: Number(despesaForm.valor), created_at: new Date().toISOString() }
-      setDespesas(prev => [...prev, nd])
-      if (pendingDespesaAnexos.length > 0) {
-        setDespesaAnexos(prev => { const next = new Map(prev); next.set(nd.id, pendingDespesaAnexos); return next })
+      if (editingDespesa) {
+        const updated: Despesa = { ...editingDespesa, ...despesaForm, valor: Number(despesaForm.valor) }
+        setDespesas(prev => prev.map(d => d.id === editingDespesa.id ? updated : d))
+        setDespesaAnexos(prev => { const next = new Map(prev); next.set(editingDespesa.id, pendingDespesaAnexos); return next })
+      } else {
+        const nd: Despesa = { id: crypto.randomUUID(), user_id: 'demo-user-id', prestacao_id: currentPrestacaoId!, ...despesaForm, valor: Number(despesaForm.valor), created_at: new Date().toISOString() }
+        setDespesas(prev => [...prev, nd])
+        if (pendingDespesaAnexos.length > 0) {
+          setDespesaAnexos(prev => { const next = new Map(prev); next.set(nd.id, pendingDespesaAnexos); return next })
+        }
       }
     } else {
-      const id = crypto.randomUUID()
+      const id = editingDespesa ? editingDespesa.id : crypto.randomUUID()
       const now = new Date().toISOString()
-      let uploadedAnexos: Anexo[] = []
+      const existingAnexos = pendingDespesaAnexos.filter(a => a.path)
+      let newUploaded: Anexo[] = []
       if (pendingDespesaFiles.length > 0) {
-        uploadedAnexos = await Promise.all(pendingDespesaFiles.map(f => uploadAnexo('despesas', id, f)))
+        try {
+          newUploaded = await Promise.all(pendingDespesaFiles.map(f => uploadAnexo('despesas', id, f)))
+        } catch (err: any) {
+          toast({ title: 'Erro ao fazer upload', description: err.message, variant: 'destructive' }); return
+        }
       }
-      const nd: Despesa = { id, user_id: 'github-user', prestacao_id: currentPrestacaoId!, ...despesaForm, valor: Number(despesaForm.valor), anexos: uploadedAnexos, created_at: now }
-      const updatedDespesas = [...despesas, nd]
+      const allAnexos = [...existingAnexos, ...newUploaded]
+      const nd: Despesa = {
+        id, user_id: 'github-user', prestacao_id: currentPrestacaoId!,
+        ...despesaForm, valor: Number(despesaForm.valor),
+        anexos: allAnexos,
+        created_at: editingDespesa?.created_at ?? now,
+      }
+      const updatedDespesas = editingDespesa
+        ? despesas.map(d => d.id === id ? nd : d)
+        : [...despesas, nd]
       const parentPrestacao = prestacoes.find(p => p.id === currentPrestacaoId!)!
       try {
         await savePrestacaoFile(parentPrestacao, updatedDespesas)
@@ -277,37 +343,43 @@ export function Prestacoes() {
         toast({ title: 'Erro ao salvar despesa', description: err.message, variant: 'destructive' }); return
       }
       setDespesas(updatedDespesas)
-      if (uploadedAnexos.length > 0) {
-        setDespesaAnexos(prev => { const next = new Map(prev); next.set(id, uploadedAnexos); return next })
-      }
+      setDespesaAnexos(prev => { const next = new Map(prev); next.set(id, allAnexos); return next })
     }
 
-    toast({ title: 'Despesa adicionada' })
+    toast({ title: editingDespesa ? 'Despesa atualizada' : 'Despesa adicionada' })
     setShowDespesaForm(false)
     setDespesaForm(emptyDespesa)
     setPendingDespesaAnexos([])
+    setPendingDespesaFiles([])
+    setEditingDespesa(null)
   }
+
+  async function handleDeleteDespesa(despesaId: string, prestacaoId: string) {
+    if (!confirm('Remover esta despesa?')) return
+    const updatedDespesas = despesas.filter(d => d.id !== despesaId)
+    if (!isDemoMode) {
+      const parentPrestacao = prestacoes.find(p => p.id === prestacaoId)!
+      try {
+        await savePrestacaoFile(parentPrestacao, updatedDespesas)
+      } catch (err: any) {
+        toast({ title: 'Erro ao remover despesa', description: err.message, variant: 'destructive' }); return
+      }
+    }
+    setDespesas(updatedDespesas)
+    toast({ title: 'Despesa removida' })
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────
 
   return (
     <div className="animate-fade-in space-y-6">
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
 
       {/* Hidden file inputs */}
-      <input
-        ref={prestacaoFileRef}
-        type="file"
-        className="hidden"
-        accept="application/pdf,image/*,.doc,.docx"
-        onChange={handlePrestacaoFileChange}
-      />
-      <input
-        ref={despesaFileRef}
-        type="file"
-        className="hidden"
-        accept="application/pdf,image/*,.doc,.docx"
-        multiple
-        onChange={handleDespesaFileChange}
-      />
+      <input ref={prestacaoFileRef} type="file" className="hidden"
+        accept="application/pdf,image/*,.doc,.docx" multiple onChange={handlePrestacaoFileChange} />
+      <input ref={despesaFileRef} type="file" className="hidden"
+        accept="application/pdf,image/*,.doc,.docx" multiple onChange={handleDespesaFileChange} />
 
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -397,7 +469,7 @@ export function Prestacoes() {
               {prestacoes.map(p => {
                 const isOpen = expanded === p.id
                 const myDespesas = despesas.filter(d => d.prestacao_id === p.id)
-                const editalAnexo = prestacaoAnexos.get(p.id)?.[0] ?? null
+                const myAnexos = prestacaoAnexos.get(p.id) ?? []
                 return (
                   <div key={p.id} className="border-b border-gray-100 dark:border-gray-700 last:border-0">
                     <div className="flex items-center gap-3 px-6 py-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer" onClick={() => setExpanded(isOpen ? null : p.id)}>
@@ -405,18 +477,20 @@ export function Prestacoes() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium text-gray-900 dark:text-white truncate">{p.titulo}</span>
                           {p.agencia_fomento && <Badge variant="secondary">{p.agencia_fomento}</Badge>}
-                          {editalAnexo && (
-                            <a
-                              href={editalAnexo.url}
-                              target="_blank"
-                              rel="noreferrer"
+                          {myAnexos.length === 1 && (
+                            <a href={fileViewerUrl(myAnexos[0])} target="_blank" rel="noreferrer"
                               onClick={e => e.stopPropagation()}
                               className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
-                              title={editalAnexo.name}
-                            >
+                              title={myAnexos[0].name}>
                               <Paperclip className="w-3 h-3" />
-                              <span className="truncate max-w-[120px]">{editalAnexo.name}</span>
+                              <span className="truncate max-w-[120px]">{myAnexos[0].name}</span>
                             </a>
+                          )}
+                          {myAnexos.length > 1 && (
+                            <span className="inline-flex items-center gap-1 text-xs text-blue-600">
+                              <Paperclip className="w-3 h-3" />
+                              <Badge variant="secondary">{myAnexos.length} docs</Badge>
+                            </span>
                           )}
                         </div>
                         <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 dark:text-gray-400 flex-wrap">
@@ -439,18 +513,26 @@ export function Prestacoes() {
 
                     {isOpen && (
                       <div className="px-6 pb-4 bg-gray-50 dark:bg-gray-900">
+                        {/* Prestação documents (shown when multiple) */}
+                        {myAnexos.length > 1 && (
+                          <div className="mb-4">
+                            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Documentos</h3>
+                            <div className="flex flex-wrap gap-2">
+                              {myAnexos.map(a => (
+                                <a key={a.id} href={fileViewerUrl(a)} target="_blank" rel="noreferrer"
+                                  className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
+                                  <Paperclip className="w-3 h-3" />
+                                  <span>{a.name}</span>
+                                  <span className="text-gray-400">({formatFileSize(a.size)})</span>
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         <div className="flex items-center justify-between mb-3">
                           <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Despesas</h3>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setCurrentPrestacaoId(p.id)
-                              setDespesaForm(emptyDespesa)
-                              setPendingDespesaAnexos([])
-                              setShowDespesaForm(true)
-                            }}
-                          >
+                          <Button variant="outline" size="sm" onClick={() => openNewDespesa(p.id)}>
                             <Plus className="w-3.5 h-3.5" /> Nova Despesa
                           </Button>
                         </div>
@@ -466,6 +548,7 @@ export function Prestacoes() {
                                 <TableHead>NF</TableHead>
                                 <TableHead>Anexos</TableHead>
                                 <TableHead className="text-right">Valor</TableHead>
+                                <TableHead></TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -493,20 +576,24 @@ export function Prestacoes() {
                                         )}
                                       </TableCell>
                                       <TableCell className="text-right font-medium text-green-700">{formatCurrency(d.valor)}</TableCell>
+                                      <TableCell>
+                                        <div className="flex items-center gap-0.5 justify-end">
+                                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditDespesa(d)} title="Editar">
+                                            <Pencil className="w-3 h-3" />
+                                          </Button>
+                                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDeleteDespesa(d.id, d.prestacao_id)} title="Remover">
+                                            <Trash2 className="w-3 h-3 text-red-500" />
+                                          </Button>
+                                        </div>
+                                      </TableCell>
                                     </TableRow>
                                     {isFilesOpen && dAnexos.length > 0 && (
                                       <TableRow key={`${d.id}-files`}>
-                                        <TableCell colSpan={6} className="bg-blue-50 py-2 px-4">
+                                        <TableCell colSpan={7} className="bg-blue-50 dark:bg-blue-950 py-2 px-4">
                                           <div className="flex flex-col gap-1">
                                             {dAnexos.map(a => (
-                                              <a
-                                                key={a.id}
-                                                href={a.url}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                download={a.name}
-                                                className="inline-flex items-center gap-2 text-xs text-blue-700 hover:underline"
-                                              >
+                                              <a key={a.id} href={fileViewerUrl(a)} target="_blank" rel="noreferrer"
+                                                className="inline-flex items-center gap-2 text-xs text-blue-700 hover:underline">
                                                 <Download className="w-3 h-3 flex-shrink-0" />
                                                 <span>{a.name}</span>
                                                 <span className="text-gray-400">({formatFileSize(a.size)})</span>
@@ -522,6 +609,7 @@ export function Prestacoes() {
                               <TableRow>
                                 <TableCell colSpan={5} className="font-semibold text-right text-gray-700 dark:text-gray-200">Total:</TableCell>
                                 <TableCell className="text-right font-bold text-green-700">{formatCurrency(myDespesas.reduce((s, d) => s + d.valor, 0))}</TableCell>
+                                <TableCell />
                               </TableRow>
                             </TableBody>
                           </Table>
@@ -536,8 +624,11 @@ export function Prestacoes() {
         </CardContent>
       </Card>
 
-      {/* Prestação form dialog */}
-      <Dialog open={showForm} onOpenChange={open => { setShowForm(open); if (!open) { setPendingAnexo(null); setPendingFile(null) } }}>
+      {/* ── Prestação form dialog ─────────────────────────────────────────── */}
+      <Dialog open={showForm} onOpenChange={open => {
+        setShowForm(open)
+        if (!open) { setPendingPrestacaoAnexos([]); setPendingPrestacaoFiles([]) }
+      }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto dark:bg-gray-900 dark:border-gray-700">
           <DialogHeader>
             <DialogTitle>{editing ? 'Editar Prestação' : 'Nova Prestação de Contas'}</DialogTitle>
@@ -576,40 +667,36 @@ export function Prestacoes() {
               <Input type="number" value={form.total_recursos ?? ''} onChange={e => setForm(f => ({ ...f, total_recursos: e.target.value ? Number(e.target.value) : undefined }))} placeholder="0,00" />
             </div>
 
-            {/* Edital attachment */}
-            <div className="sm:col-span-2 space-y-1.5 pt-2 border-t border-gray-100 dark:border-gray-700">
-              <Label>Documento do Edital</Label>
-              {pendingAnexo ? (
-                <div className="flex items-center gap-3 p-3 rounded-lg bg-blue-50 border border-blue-100">
-                  <Paperclip className="w-4 h-4 text-blue-500 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-blue-800 truncate">{pendingAnexo.name}</p>
-                    <p className="text-xs text-blue-500">{formatFileSize(pendingAnexo.size)}</p>
-                  </div>
-                  <div className="flex gap-1">
-                    <a href={pendingAnexo.url} target="_blank" rel="noreferrer" className="text-blue-600 hover:text-blue-800">
-                      <Download className="w-4 h-4" />
-                    </a>
-                    <button
-                      className="text-red-400 hover:text-red-600 ml-1"
-                      onClick={() => setPendingAnexo(null)}
-                      title="Remover arquivo"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    type="button"
-                    onClick={() => prestacaoFileRef.current?.click()}
-                  >
-                    <Paperclip className="w-4 h-4" /> Anexar Edital
-                  </Button>
-                  <span className="text-xs text-gray-400 dark:text-gray-500">PDF, imagem, DOC — sem arquivo anexado</span>
+            {/* Edital attachments — multiple */}
+            <div className="sm:col-span-2 space-y-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+              <Label>Documentos do Edital</Label>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" type="button" onClick={() => prestacaoFileRef.current?.click()}>
+                  <Paperclip className="w-4 h-4" /> Adicionar Arquivos
+                </Button>
+                <span className="text-xs text-gray-400 dark:text-gray-500">PDF, imagem, DOC (múltiplos)</span>
+              </div>
+              {pendingPrestacaoAnexos.length > 0 && (
+                <div className="space-y-1.5 mt-1">
+                  {pendingPrestacaoAnexos.map((a, i) => (
+                    <div key={a.id} className="flex items-center gap-2 p-2 rounded-lg bg-blue-50 border border-blue-100 dark:bg-blue-950 dark:border-blue-900">
+                      <Paperclip className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-blue-800 dark:text-blue-300 truncate">{a.name}</p>
+                        <p className="text-xs text-blue-400">{formatFileSize(a.size)}</p>
+                      </div>
+                      <div className="flex gap-1 items-center">
+                        {a.url && (
+                          <a href={fileViewerUrl(a)} target="_blank" rel="noreferrer" className="text-blue-600 hover:text-blue-800">
+                            <Download className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                        <button className="text-red-400 hover:text-red-600 ml-1" onClick={() => removePrestacaoAnexo(i)} title="Remover">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -621,11 +708,14 @@ export function Prestacoes() {
         </DialogContent>
       </Dialog>
 
-      {/* Despesa form dialog */}
-      <Dialog open={showDespesaForm} onOpenChange={open => { setShowDespesaForm(open); if (!open) { setPendingDespesaAnexos([]); setPendingDespesaFiles([]) } }}>
+      {/* ── Despesa form dialog ───────────────────────────────────────────── */}
+      <Dialog open={showDespesaForm} onOpenChange={open => {
+        setShowDespesaForm(open)
+        if (!open) { setPendingDespesaAnexos([]); setPendingDespesaFiles([]); setEditingDespesa(null) }
+      }}>
         <DialogContent className="dark:bg-gray-900 dark:border-gray-700">
           <DialogHeader>
-            <DialogTitle>Nova Despesa</DialogTitle>
+            <DialogTitle>{editingDespesa ? 'Editar Despesa' : 'Nova Despesa'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
@@ -651,36 +741,34 @@ export function Prestacoes() {
               <Input value={despesaForm.numero_nota_fiscal} onChange={e => setDespesaForm(f => ({ ...f, numero_nota_fiscal: e.target.value }))} />
             </div>
 
-            {/* Despesa attachment section */}
+            {/* Despesa attachments */}
             <div className="space-y-2 pt-2 border-t border-gray-100 dark:border-gray-700">
               <Label>Anexar Documentos</Label>
               <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  type="button"
-                  onClick={() => despesaFileRef.current?.click()}
-                >
+                <Button variant="outline" size="sm" type="button" onClick={() => despesaFileRef.current?.click()}>
                   <Paperclip className="w-4 h-4" /> Adicionar Arquivos
                 </Button>
                 <span className="text-xs text-gray-400 dark:text-gray-500">PDF, imagem, DOC (múltiplos)</span>
               </div>
               {pendingDespesaAnexos.length > 0 && (
-                <div className="space-y-1.5 mt-2">
+                <div className="space-y-1.5 mt-1">
                   {pendingDespesaAnexos.map((a, i) => (
-                    <div key={a.id} className="flex items-center gap-2 p-2 rounded-lg bg-blue-50 border border-blue-100">
+                    <div key={a.id} className="flex items-center gap-2 p-2 rounded-lg bg-blue-50 border border-blue-100 dark:bg-blue-950 dark:border-blue-900">
                       <Paperclip className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-blue-800 truncate">{a.name}</p>
+                        <p className="text-xs font-medium text-blue-800 dark:text-blue-300 truncate">{a.name}</p>
                         <p className="text-xs text-blue-400">{formatFileSize(a.size)}</p>
                       </div>
-                      <button
-                        className="text-red-400 hover:text-red-600"
-                        onClick={() => { setPendingDespesaAnexos(prev => prev.filter((_, idx) => idx !== i)); setPendingDespesaFiles(prev => prev.filter((_, idx) => idx !== i)) }}
-                        title="Remover"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex gap-1 items-center">
+                        {a.url && (
+                          <a href={fileViewerUrl(a)} target="_blank" rel="noreferrer" className="text-blue-600 hover:text-blue-800">
+                            <Download className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                        <button className="text-red-400 hover:text-red-600 ml-1" onClick={() => removeDespesaAnexo(i)} title="Remover">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -689,7 +777,7 @@ export function Prestacoes() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDespesaForm(false)}>Cancelar</Button>
-            <Button onClick={handleSaveDespesa}>Adicionar</Button>
+            <Button onClick={handleSaveDespesa}>{editingDespesa ? 'Salvar' : 'Adicionar'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
