@@ -270,7 +270,9 @@ export function Prestacoes() {
       let newUploaded: Anexo[] = []
       if (pendingPrestacaoFiles.length > 0) {
         try {
-          newUploaded = await Promise.all(pendingPrestacaoFiles.map(f => uploadAnexo('prestacoes', id, f)))
+          for (const f of pendingPrestacaoFiles) {
+            newUploaded.push(await uploadAnexo('prestacoes', id, f))
+          }
         } catch (err: any) {
           toast({ title: 'Erro ao fazer upload', description: err.message, variant: 'destructive' }); return
         }
@@ -372,7 +374,9 @@ export function Prestacoes() {
       let newUploaded: Anexo[] = []
       if (pendingDespesaFiles.length > 0) {
         try {
-          newUploaded = await Promise.all(pendingDespesaFiles.map(f => uploadAnexo('despesas', id, f)))
+          for (const f of pendingDespesaFiles) {
+            newUploaded.push(await uploadAnexo('despesas', id, f))
+          }
         } catch (err: any) {
           toast({ title: 'Erro ao fazer upload', description: err.message, variant: 'destructive' }); return
         }
@@ -519,7 +523,9 @@ export function Prestacoes() {
             <div>
               {prestacoes.map(p => {
                 const isOpen = expanded === p.id
-                const myDespesas = despesas.filter(d => d.prestacao_id === p.id)
+                const myDespesas = despesas
+                  .filter(d => d.prestacao_id === p.id)
+                  .sort((a, b) => (b.data ?? '').localeCompare(a.data ?? ''))
                 const myAnexos = prestacaoAnexos.get(p.id) ?? []
                 return (
                   <div key={p.id} className="border-b border-gray-100 dark:border-gray-700 last:border-0">
