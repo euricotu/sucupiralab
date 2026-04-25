@@ -53,6 +53,57 @@ function exportPDF(prestacoes: Prestacao[]) {
   doc.save('prestacoes.pdf')
 }
 
+function exportDespesasPDF(prestacao: Prestacao, myDespesas: Despesa[]) {
+  const doc = new jsPDF()
+  doc.setFontSize(14)
+  doc.text(`Despesas — ${prestacao.titulo}`, 14, 22)
+  doc.setFontSize(9)
+  doc.text(`Exportado em ${new Date().toLocaleDateString('pt-BR')}`, 14, 29)
+  if (prestacao.agencia_fomento) doc.text(`Agência: ${prestacao.agencia_fomento}`, 14, 35)
+  const total = myDespesas.reduce((s, d) => s + d.valor, 0)
+  autoTable(doc, {
+    startY: prestacao.agencia_fomento ? 40 : 34,
+    head: [['Descrição', 'Data', 'Prestador', 'Nota Fiscal', 'Valor']],
+    body: [
+      ...myDespesas.map(d => [
+        d.descricao,
+        formatDate(d.data),
+        d.prestador_servico ?? '—',
+        d.numero_nota_fiscal ?? '—',
+        formatCurrency(d.valor),
+      ]),
+      ['', '', '', 'Total', formatCurrency(total)],
+    ],
+    styles: { fontSize: 8 },
+    headStyles: { fillColor: [37, 99, 235] },
+    bodyStyles: { textColor: [40, 40, 40] },
+    didParseCell: (data) => {
+      if (data.row.index === myDespesas.length) {
+        data.cell.styles.fontStyle = 'bold'
+      }
+    },
+  })
+  const slug = prestacao.titulo.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+  doc.save(`despesas-${slug}.pdf`)
+}
+
+function exportDespesasExcel(prestacao: Prestacao, myDespesas: Despesa[]) {
+  const rows = myDespesas.map(d => ({
+    Descrição: d.descricao,
+    Data: formatDate(d.data),
+    'Prestador de Serviço': d.prestador_servico ?? '',
+    'Nota Fiscal': d.numero_nota_fiscal ?? '',
+    'Valor (R$)': d.valor,
+  }))
+  const total = myDespesas.reduce((s, d) => s + d.valor, 0)
+  rows.push({ Descrição: 'TOTAL', Data: '', 'Prestador de Serviço': '', 'Nota Fiscal': '', 'Valor (R$)': total })
+  const ws = XLSX.utils.json_to_sheet(rows)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Despesas')
+  const slug = prestacao.titulo.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+  XLSX.writeFile(wb, `despesas-${slug}.xlsx`)
+}
+
 function exportExcel(prestacoes: Prestacao[]) {
   const ws = XLSX.utils.json_to_sheet(prestacoes.map(p => ({
     Título: p.titulo,
@@ -532,9 +583,21 @@ export function Prestacoes() {
 
                         <div className="flex items-center justify-between mb-3">
                           <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Despesas</h3>
-                          <Button variant="outline" size="sm" onClick={() => openNewDespesa(p.id)}>
-                            <Plus className="w-3.5 h-3.5" /> Nova Despesa
-                          </Button>
+                          <div className="flex gap-1.5">
+                            {myDespesas.length > 0 && (
+                              <>
+                                <Button variant="outline" size="sm" onClick={() => exportDespesasExcel(p, myDespesas)} title="Exportar despesas para Excel">
+                                  <FileText className="w-3.5 h-3.5" /> Excel
+                                </Button>
+                                <Button variant="outline" size="sm" onClick={() => exportDespesasPDF(p, myDespesas)} title="Exportar despesas para PDF">
+                                  <FileText className="w-3.5 h-3.5" /> PDF
+                                </Button>
+                              </>
+                            )}
+                            <Button variant="outline" size="sm" onClick={() => openNewDespesa(p.id)}>
+                              <Plus className="w-3.5 h-3.5" /> Nova Despesa
+                            </Button>
+                          </div>
                         </div>
                         {myDespesas.length === 0 ? (
                           <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-4">Nenhuma despesa registrada</p>
