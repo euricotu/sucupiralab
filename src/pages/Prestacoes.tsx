@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Receipt, Pencil, Trash2, ChevronDown, ChevronUp, FileText, DollarSign, Paperclip, Download } from 'lucide-react'
+import { Plus, Receipt, Pencil, Trash2, ChevronDown, ChevronUp, FileText, DollarSign, Paperclip, Download, Archive, Loader2 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useDemoData } from '@/hooks/useDemoData'
 import { useToast } from '@/hooks/useToast'
-import { loadPrestacoes, savePrestacaoFile, deletePrestacaoFile, uploadAnexo } from '@/lib/githubStorage'
+import { loadPrestacoes, savePrestacaoFile, deletePrestacaoFile, uploadAnexo, fetchAttachment } from '@/lib/githubStorage'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -165,6 +165,7 @@ export function Prestacoes() {
   const [pendingDespesaFiles, setPendingDespesaFiles] = useState<File[]>([])
 
   const [expandedDespesaFiles, setExpandedDespesaFiles] = useState<string | null>(null)
+  const [zippingId, setZippingId] = useState<string | null>(null)
 
   const prestacaoFileRef = useRef<HTMLInputElement>(null)
   const despesaFileRef = useRef<HTMLInputElement>(null)
@@ -427,6 +428,73 @@ export function Prestacoes() {
     toast({ title: 'Despesa removida' })
   }
 
+  // ── ZIP export ───────────────────────────────────────────────────────────
+
+  async function exportDespesasZip(prestacao: Prestacao, myDespesas: Despesa[]) {
+    if (zippingId) return
+    setZippingId(prestacao.id)
+    try {
+      const JSZip = (await import('jszip')).default
+      const zip = new JSZip()
+      const slug = prestacao.titulo.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+
+      // Excel de despesas
+      const rows = myDespesas.map(d => ({
+        Descrição: d.descricao,
+        Data: formatDate(d.data),
+        'Prestador de Serviço': d.prestador_servico ?? '',
+        'Nota Fiscal': d.numero_nota_fiscal ?? '',
+        'Valor (R$)': d.valor,
+      }))
+      const total = myDespesas.reduce((s, d) => s + d.valor, 0)
+      rows.push({ Descrição: 'TOTAL', Data: '', 'Prestador de Serviço': '', 'Nota Fiscal': '', 'Valor (R$)': total })
+      const ws = XLSX.utils.json_to_sheet(rows)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'Despesas')
+      zip.file(`despesas-${slug}.xlsx`, XLSX.write(wb, { type: 'array', bookType: 'xlsx' }))
+
+      // Documentos da prestação (editais etc.)
+      const pAnexos = prestacaoAnexos.get(prestacao.id) ?? []
+      for (const a of pAnexos) {
+        const buf = await fetchBuf(a)
+        zip.file(`documentos/${a.name}`, buf)
+      }
+
+      // Anexos por despesa
+      for (const d of myDespesas) {
+        const dAnexos = despesaAnexos.get(d.id) ?? []
+        for (const a of dAnexos) {
+          const buf = await fetchBuf(a)
+          const folder = `despesas/${d.data ?? 'sem-data'} ${d.descricao.slice(0, 30).replace(/[/\\?%*:|"<>]/g, '_')}`
+          zip.file(`${folder}/${a.name}`, buf)
+        }
+      }
+
+      const blob = await zip.generateAsync({ type: 'blob' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `prestacao-${slug}.zip`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      toast({ title: 'ZIP gerado com sucesso' })
+    } catch (err: any) {
+      toast({ title: 'Erro ao gerar ZIP', description: err.message, variant: 'destructive' })
+    } finally {
+      setZippingId(null)
+    }
+  }
+
+  async function fetchBuf(a: Anexo): Promise<ArrayBuffer> {
+    if (!isDemoMode && a.path) {
+      const { blob } = await fetchAttachment(a.path)
+      return blob.arrayBuffer()
+    }
+    return fetch(a.url).then(r => r.arrayBuffer())
+  }
+
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
@@ -600,6 +668,10 @@ export function Prestacoes() {
                                 </Button>
                                 <Button variant="outline" size="sm" onClick={() => exportDespesasPDF(p, myDespesas)} title="Exportar despesas para PDF">
                                   <FileText className="w-3.5 h-3.5" /> PDF
+                                </Button>
+                                <Button variant="outline" size="sm" onClick={() => exportDespesasZip(p, myDespesas)} disabled={zippingId === p.id} title="Baixar planilha + anexos em ZIP">
+                                  {zippingId === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Archive className="w-3.5 h-3.5" />}
+                                  {zippingId === p.id ? 'Gerando…' : 'ZIP'}
                                 </Button>
                               </>
                             )}
