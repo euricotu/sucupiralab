@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { ToastContainer } from '@/components/ui/toast'
@@ -122,6 +123,7 @@ function exportExcel(prestacoes: Prestacao[]) {
 const emptyPrestacao: Omit<Prestacao, 'id' | 'user_id' | 'created_at' | 'updated_at'> = {
   titulo: '', numero_processo: '', numero_edital: '', nome_edital: '',
   agencia_fomento: '', vigencia_inicio: '', vigencia_fim: '', total_recursos: undefined,
+  observacoes_rubricas: '',
 }
 
 const emptyDespesa: Omit<Despesa, 'id' | 'user_id' | 'prestacao_id' | 'created_at'> = {
@@ -229,6 +231,7 @@ export function Prestacoes() {
       vigencia_inicio: p.vigencia_inicio ?? '',
       vigencia_fim: p.vigencia_fim ?? '',
       total_recursos: p.total_recursos,
+      observacoes_rubricas: p.observacoes_rubricas ?? '',
     })
     setPendingPrestacaoAnexos(prestacaoAnexos.get(p.id) ?? [])
     setPendingPrestacaoFiles([])
@@ -734,6 +737,16 @@ export function Prestacoes() {
             <div className="space-y-1.5">
               <Label>Total de Recursos (R$)</Label>
               <Input type="number" value={form.total_recursos ?? ''} onChange={e => setForm(f => ({ ...f, total_recursos: e.target.value ? Number(e.target.value) : undefined }))} placeholder="0,00" />
+            </div>
+
+            <div className="sm:col-span-2 space-y-1.5">
+              <Label>Observações sobre Rubricas</Label>
+              <Textarea
+                value={form.observacoes_rubricas ?? ''}
+                onChange={e => setForm(f => ({ ...f, observacoes_rubricas: e.target.value }))}
+                placeholder="Descreva as rubricas, restrições ou orientações específicas sobre o uso dos recursos…"
+                rows={4}
+              />
             </div>
 
             {/* Edital attachments — multiple */}

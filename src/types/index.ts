@@ -25,6 +25,7 @@ export interface Prestacao {
   vigencia_inicio?: string
   vigencia_fim?: string
   total_recursos?: number
+  observacoes_rubricas?: string
   anexos?: Anexo[]   // edital / financing docs
   created_at: string
   updated_at: string
