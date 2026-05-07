@@ -76,6 +76,7 @@ export interface NotaReuniao {
   id: string
   data?: string     // ISO date, optional — entries without date are undated
   texto: string
+  anexo?: Anexo     // optional file attachment
 }
 
 export interface Orientacao {

@@ -54,6 +54,7 @@ function downloadNotasMarkdown(o: Orientacao) {
     sorted.forEach(r => {
       lines.push(r.data ? `## ${r.data}` : `## (sem data)`)
       lines.push(``, r.texto, ``)
+      if (r.anexo) lines.push(`📎 ${r.anexo.name}`, ``)
     })
   }
   const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
@@ -122,14 +123,12 @@ type OrientacaoForm = {
   ano_ingresso?: number
   previsao_conclusao: string
   exame_qualificacao: boolean
-  leituras_str: string
-  links_documentos_str: string
 }
 
 const emptyForm: OrientacaoForm = {
   nome_orientando: '', curso: 'Mestrado', titulo_provisorio: '',
   ano_ingresso: undefined, previsao_conclusao: '',
-  exame_qualificacao: false, leituras_str: '', links_documentos_str: '',
+  exame_qualificacao: false,
 }
 
 /* ─── Component ──────────────────────────────────────────────────────── */
@@ -162,6 +161,16 @@ export function Orientacoes() {
   const [activeReuniaoId, setActiveReuniaoId] = useState<string | null>(null)
   const [novaReuniaoData, setNovaReuniaoData] = useState('')
   const [novaReuniaoTexto, setNovaReuniaoTexto] = useState('')
+  const [novaReuniaoFile, setNovaReuniaoFile] = useState<File | null>(null)
+  const reuniaoFileRef = useRef<HTMLInputElement>(null)
+
+  // Leitura inline add
+  const [novaLeitura, setNovaLeitura] = useState('')
+  const [activeLeituraId, setActiveLeituraId] = useState<string | null>(null)
+
+  // Link inline add
+  const [novaLink, setNovaLink] = useState('')
+  const [activeLinkId, setActiveLinkId] = useState<string | null>(null)
 
   useEffect(() => {
     if (isDemoMode) return
@@ -178,6 +187,7 @@ export function Orientacoes() {
     setEditing(null)
     setForm(emptyForm)
     setPendingProjetoOriginal(null)
+    setPendingProjetoFile(null)
     setShowForm(true)
   }
 
@@ -190,8 +200,6 @@ export function Orientacoes() {
       ano_ingresso: o.ano_ingresso,
       previsao_conclusao: o.previsao_conclusao ?? '',
       exame_qualificacao: o.exame_qualificacao ?? false,
-      leituras_str: (o.leituras ?? []).join('\n'),
-      links_documentos_str: (o.links_documentos ?? []).join('\n'),
     })
     setPendingProjetoOriginal(null)
     setPendingProjetoFile(null)
@@ -205,8 +213,6 @@ export function Orientacoes() {
       toast({ title: 'Nome obrigatório', variant: 'destructive' })
       return
     }
-    const leituras = form.leituras_str.split('\n').map(s => s.trim()).filter(Boolean)
-    const links_documentos = form.links_documentos_str.split('\n').map(s => s.trim()).filter(Boolean)
     const projeto_original = pendingProjetoOriginal ?? editing?.projeto_original ?? undefined
 
     const payload = {
@@ -216,8 +222,8 @@ export function Orientacoes() {
       ano_ingresso: form.ano_ingresso ? Number(form.ano_ingresso) : undefined,
       previsao_conclusao: form.previsao_conclusao,
       exame_qualificacao: form.exame_qualificacao,
-      leituras,
-      links_documentos,
+      leituras: editing?.leituras ?? [],
+      links_documentos: editing?.links_documentos ?? [],
       projeto_original,
     }
 
@@ -318,12 +324,34 @@ export function Orientacoes() {
 
   /* ── Reuniões ── */
 
-  function addReuniao(orientacaoId: string) {
+  async function addReuniao(orientacaoId: string) {
     if (!novaReuniaoTexto.trim()) return
+
+    let anexo: Anexo | undefined
+    if (novaReuniaoFile) {
+      if (isDemoMode) {
+        anexo = {
+          id: crypto.randomUUID(),
+          name: novaReuniaoFile.name,
+          size: novaReuniaoFile.size,
+          url: URL.createObjectURL(novaReuniaoFile),
+          type: novaReuniaoFile.type,
+        }
+      } else {
+        try {
+          anexo = await uploadAnexo('orientacoes', orientacaoId, novaReuniaoFile)
+        } catch (err: any) {
+          toast({ title: 'Erro ao fazer upload', description: err.message, variant: 'destructive' })
+          return
+        }
+      }
+    }
+
     const entry: NotaReuniao = {
       id: crypto.randomUUID(),
       ...(novaReuniaoData ? { data: novaReuniaoData } : {}),
       texto: novaReuniaoTexto.trim(),
+      ...(anexo ? { anexo } : {}),
     }
     const updatedOrientacoes = orientacoes.map(o =>
       o.id !== orientacaoId ? o : { ...o, reunioes: [...(o.reunioes ?? []), entry] }
@@ -331,6 +359,7 @@ export function Orientacoes() {
     setOrientacoes(updatedOrientacoes)
     setNovaReuniaoTexto('')
     setNovaReuniaoData('')
+    setNovaReuniaoFile(null)
     setActiveReuniaoId(null)
     if (!isDemoMode) {
       const updatedO = updatedOrientacoes.find(o => o.id === orientacaoId)!
@@ -350,7 +379,81 @@ export function Orientacoes() {
     }
   }
 
-  /* ── File picker ── */
+  function deleteReuniaoAnexo(orientacaoId: string, reuniaoId: string) {
+    const updatedOrientacoes = orientacoes.map(o =>
+      o.id !== orientacaoId ? o
+        : {
+            ...o, reunioes: (o.reunioes ?? []).map(r =>
+              r.id !== reuniaoId ? r : { ...r, anexo: undefined }
+            ),
+          }
+    )
+    setOrientacoes(updatedOrientacoes)
+    if (!isDemoMode) {
+      const updatedO = updatedOrientacoes.find(o => o.id === orientacaoId)!
+      saveOrientacaoFile(updatedO, tarefas).catch(() => {})
+    }
+  }
+
+  /* ── Leituras ── */
+
+  async function addLeitura(orientacaoId: string) {
+    if (!novaLeitura.trim()) return
+    const updatedOrientacoes = orientacoes.map(o =>
+      o.id !== orientacaoId ? o
+        : { ...o, leituras: [...(o.leituras ?? []), novaLeitura.trim()], updated_at: new Date().toISOString() }
+    )
+    setOrientacoes(updatedOrientacoes)
+    setNovaLeitura('')
+    setActiveLeituraId(null)
+    if (!isDemoMode) {
+      const updatedO = updatedOrientacoes.find(o => o.id === orientacaoId)!
+      saveOrientacaoFile(updatedO, tarefas).catch(() => {})
+    }
+  }
+
+  function deleteLeitura(orientacaoId: string, idx: number) {
+    const updatedOrientacoes = orientacoes.map(o =>
+      o.id !== orientacaoId ? o
+        : { ...o, leituras: (o.leituras ?? []).filter((_, i) => i !== idx), updated_at: new Date().toISOString() }
+    )
+    setOrientacoes(updatedOrientacoes)
+    if (!isDemoMode) {
+      const updatedO = updatedOrientacoes.find(o => o.id === orientacaoId)!
+      saveOrientacaoFile(updatedO, tarefas).catch(() => {})
+    }
+  }
+
+  /* ── Links ── */
+
+  async function addLink(orientacaoId: string) {
+    if (!novaLink.trim()) return
+    const updatedOrientacoes = orientacoes.map(o =>
+      o.id !== orientacaoId ? o
+        : { ...o, links_documentos: [...(o.links_documentos ?? []), novaLink.trim()], updated_at: new Date().toISOString() }
+    )
+    setOrientacoes(updatedOrientacoes)
+    setNovaLink('')
+    setActiveLinkId(null)
+    if (!isDemoMode) {
+      const updatedO = updatedOrientacoes.find(o => o.id === orientacaoId)!
+      saveOrientacaoFile(updatedO, tarefas).catch(() => {})
+    }
+  }
+
+  function deleteLink(orientacaoId: string, idx: number) {
+    const updatedOrientacoes = orientacoes.map(o =>
+      o.id !== orientacaoId ? o
+        : { ...o, links_documentos: (o.links_documentos ?? []).filter((_, i) => i !== idx), updated_at: new Date().toISOString() }
+    )
+    setOrientacoes(updatedOrientacoes)
+    if (!isDemoMode) {
+      const updatedO = updatedOrientacoes.find(o => o.id === orientacaoId)!
+      saveOrientacaoFile(updatedO, tarefas).catch(() => {})
+    }
+  }
+
+  /* ── File pickers ── */
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -366,6 +469,12 @@ export function Orientacoes() {
     e.target.value = ''
   }
 
+  function handleReuniaoFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) setNovaReuniaoFile(file)
+    e.target.value = ''
+  }
+
   /* ── Grouped list ── */
 
   const byCurso = CURSOS.filter(c => orientacoes.some(o => o.curso === c))
@@ -376,8 +485,9 @@ export function Orientacoes() {
     <div className="animate-fade-in space-y-6">
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
 
-      {/* Hidden file input for projeto original */}
+      {/* Hidden file inputs */}
       <input type="file" ref={fileRef} className="hidden" onChange={handleFileSelect} />
+      <input type="file" ref={reuniaoFileRef} className="hidden" onChange={handleReuniaoFileSelect} />
 
       {/* ── Page header ── */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -461,8 +571,6 @@ export function Orientacoes() {
                   if (b.data) return 1
                   return 0
                 })
-                const hasLinks = (o.links_documentos ?? []).length > 0
-                const hasDocs = hasLinks || !!o.projeto_original
 
                 return (
                   <Card key={o.id} className="hover:shadow-md transition-shadow">
@@ -528,16 +636,21 @@ export function Orientacoes() {
                     {isOpen && (
                       <div className="border-t border-gray-100 dark:border-gray-700 px-6 py-4">
                         <Tabs defaultValue="tarefas">
-                          <TabsList className="mb-4">
-                            <TabsTrigger value="tarefas">Tarefas ({myTarefas.length})</TabsTrigger>
-                            <TabsTrigger value="reunioes">Reuniões ({reunioes.length})</TabsTrigger>
-                            {(o.leituras ?? []).length > 0 && (
-                              <TabsTrigger value="leituras">
-                                Leituras ({(o.leituras ?? []).length})
-                              </TabsTrigger>
-                            )}
-                            {hasDocs && (
-                              <TabsTrigger value="documentos">Documentos</TabsTrigger>
+                          <TabsList className="mb-4 flex-wrap h-auto gap-1">
+                            <TabsTrigger value="tarefas">
+                              Tarefas ({myTarefas.length})
+                            </TabsTrigger>
+                            <TabsTrigger value="reunioes">
+                              Reuniões ({reunioes.length})
+                            </TabsTrigger>
+                            <TabsTrigger value="leituras">
+                              Leituras ({(o.leituras ?? []).length})
+                            </TabsTrigger>
+                            <TabsTrigger value="links">
+                              Links ({(o.links_documentos ?? []).length})
+                            </TabsTrigger>
+                            {o.projeto_original && (
+                              <TabsTrigger value="projeto">Projeto</TabsTrigger>
                             )}
                           </TabsList>
 
@@ -623,8 +736,33 @@ export function Orientacoes() {
                                       </span>
                                     )}
                                     <p className="text-sm text-gray-700 dark:text-gray-200 whitespace-pre-wrap">{r.texto}</p>
+                                    {/* Attachment */}
+                                    {r.anexo && (
+                                      <div className="mt-2 flex items-center gap-2">
+                                        <a
+                                          href={r.anexo.url}
+                                          download={r.anexo.name}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 px-2 py-1 rounded-md transition-colors"
+                                        >
+                                          <Paperclip className="w-3 h-3 flex-shrink-0" />
+                                          <span className="truncate max-w-[200px]">{r.anexo.name}</span>
+                                          <span className="text-gray-400 dark:text-gray-500 ml-0.5">
+                                            ({formatFileSize(r.anexo.size)})
+                                          </span>
+                                        </a>
+                                        <button
+                                          onClick={() => deleteReuniaoAnexo(o.id, r.id)}
+                                          className="text-gray-300 dark:text-gray-600 hover:text-red-500 transition-colors"
+                                          title="Remover anexo"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
-                                  {/* Delete */}
+                                  {/* Delete reunião */}
                                   <button
                                     onClick={() => deleteReuniao(o.id, r.id)}
                                     className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-gray-300 dark:text-gray-600 hover:text-red-500 flex-shrink-0 mt-0.5"
@@ -663,6 +801,28 @@ export function Orientacoes() {
                                 rows={2}
                                 className="text-sm"
                               />
+                              {/* File attachment */}
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => { setActiveReuniaoId(o.id); reuniaoFileRef.current?.click() }}
+                                  className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-2 py-1 rounded border border-gray-200 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-400 transition-colors bg-white dark:bg-gray-900"
+                                >
+                                  <Paperclip className="w-3.5 h-3.5" />
+                                  {activeReuniaoId === o.id && novaReuniaoFile
+                                    ? novaReuniaoFile.name
+                                    : 'Anexar arquivo'}
+                                </button>
+                                {activeReuniaoId === o.id && novaReuniaoFile && (
+                                  <button
+                                    onClick={() => setNovaReuniaoFile(null)}
+                                    className="text-gray-400 dark:text-gray-500 hover:text-red-500 transition-colors"
+                                    title="Remover arquivo"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
                               <div className="flex justify-end">
                                 <Button
                                   size="sm" variant="outline"
@@ -681,75 +841,117 @@ export function Orientacoes() {
                           </TabsContent>
 
                           {/* ── Leituras tab ── */}
-                          {(o.leituras ?? []).length > 0 && (
-                            <TabsContent value="leituras">
-                              <div className="space-y-1.5">
-                                {(o.leituras ?? []).map((l, i) => (
-                                  <div
-                                    key={i}
-                                    className="flex items-start gap-2 p-2 rounded-lg bg-gray-50 dark:bg-gray-800"
+                          <TabsContent value="leituras">
+                            <div className="space-y-1.5 mb-3">
+                              {(o.leituras ?? []).map((l, i) => (
+                                <div
+                                  key={i}
+                                  className="flex items-start gap-2 p-2 rounded-lg bg-gray-50 dark:bg-gray-800 group"
+                                >
+                                  <BookOpen className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 mt-0.5 flex-shrink-0" />
+                                  <span className="text-sm text-gray-700 dark:text-gray-200 flex-1">{l}</span>
+                                  <button
+                                    onClick={() => deleteLeitura(o.id, i)}
+                                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-gray-300 dark:text-gray-600 hover:text-red-500 flex-shrink-0"
+                                    title="Remover"
                                   >
-                                    <BookOpen className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 mt-0.5 flex-shrink-0" />
-                                    <span className="text-sm text-gray-700 dark:text-gray-200">{l}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </TabsContent>
-                          )}
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ))}
+                              {(o.leituras ?? []).length === 0 && (
+                                <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-2">
+                                  Nenhuma leitura indicada
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex gap-2" onClick={e => e.stopPropagation()}>
+                              <Input
+                                value={activeLeituraId === o.id ? novaLeitura : ''}
+                                onChange={e => { setActiveLeituraId(o.id); setNovaLeitura(e.target.value) }}
+                                onKeyDown={e => { if (e.key === 'Enter') addLeitura(o.id) }}
+                                placeholder="Referência (Enter para adicionar)"
+                                className="flex-1"
+                              />
+                              <Button
+                                size="sm" variant="outline"
+                                onClick={() => { setActiveLeituraId(o.id); addLeitura(o.id) }}
+                              >
+                                <Plus className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </TabsContent>
 
-                          {/* ── Documentos tab ── */}
-                          {hasDocs && (
-                            <TabsContent value="documentos">
-                              <div className="space-y-4">
-                                {o.projeto_original && (
-                                  <div>
-                                    <p className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">
-                                      Projeto Original
-                                    </p>
-                                    <a
-                                      href={o.projeto_original.url}
-                                      download={o.projeto_original.name}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="flex items-center gap-2 p-2.5 rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors group"
-                                    >
-                                      <Paperclip className="w-4 h-4 text-gray-400 dark:text-gray-500 flex-shrink-0" />
-                                      <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-medium text-gray-700 dark:text-gray-200 truncate">
-                                          {o.projeto_original.name}
-                                        </p>
-                                        <p className="text-xs text-gray-400 dark:text-gray-500">
-                                          {formatFileSize(o.projeto_original.size)}
-                                        </p>
-                                      </div>
-                                      <Download className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300" />
-                                    </a>
-                                  </div>
-                                )}
-                                {hasLinks && (
-                                  <div>
-                                    <p className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">
-                                      Links de Documentos
-                                    </p>
-                                    <div className="space-y-1.5">
-                                      {(o.links_documentos ?? []).map((link, i) => (
-                                        <a
-                                          key={i}
-                                          href={link}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="flex items-center gap-2 p-2 rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                                        >
-                                          <Link2 className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
-                                          <span className="text-sm text-blue-600 truncate hover:underline">
-                                            {link}
-                                          </span>
-                                        </a>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
+                          {/* ── Links tab ── */}
+                          <TabsContent value="links">
+                            <div className="space-y-1.5 mb-3">
+                              {(o.links_documentos ?? []).map((link, i) => (
+                                <div
+                                  key={i}
+                                  className="flex items-center gap-2 p-2 rounded-lg bg-gray-50 dark:bg-gray-800 group"
+                                >
+                                  <Link2 className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+                                  <a
+                                    href={link}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-sm text-blue-600 truncate flex-1 hover:underline"
+                                  >
+                                    {link}
+                                  </a>
+                                  <button
+                                    onClick={() => deleteLink(o.id, i)}
+                                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-gray-300 dark:text-gray-600 hover:text-red-500 flex-shrink-0"
+                                    title="Remover"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ))}
+                              {(o.links_documentos ?? []).length === 0 && (
+                                <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-2">
+                                  Nenhum link cadastrado
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex gap-2" onClick={e => e.stopPropagation()}>
+                              <Input
+                                value={activeLinkId === o.id ? novaLink : ''}
+                                onChange={e => { setActiveLinkId(o.id); setNovaLink(e.target.value) }}
+                                onKeyDown={e => { if (e.key === 'Enter') addLink(o.id) }}
+                                placeholder="https://... (Enter para adicionar)"
+                                className="flex-1"
+                              />
+                              <Button
+                                size="sm" variant="outline"
+                                onClick={() => { setActiveLinkId(o.id); addLink(o.id) }}
+                              >
+                                <Plus className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </TabsContent>
+
+                          {/* ── Projeto Original tab (conditional) ── */}
+                          {o.projeto_original && (
+                            <TabsContent value="projeto">
+                              <a
+                                href={o.projeto_original.url}
+                                download={o.projeto_original.name}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="flex items-center gap-2 p-2.5 rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors group"
+                              >
+                                <Paperclip className="w-4 h-4 text-gray-400 dark:text-gray-500 flex-shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-gray-700 dark:text-gray-200 truncate">
+                                    {o.projeto_original.name}
+                                  </p>
+                                  <p className="text-xs text-gray-400 dark:text-gray-500">
+                                    {formatFileSize(o.projeto_original.size)}
+                                  </p>
+                                </div>
+                                <Download className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300" />
+                              </a>
                             </TabsContent>
                           )}
                         </Tabs>
@@ -808,7 +1010,7 @@ export function Orientacoes() {
                 />
               </div>
 
-              {/* Ano de Ingresso + Previsão de Conclusão — side by side */}
+              {/* Ano de Ingresso + Previsão de Conclusão */}
               <div className="space-y-1.5">
                 <Label>Ano de Ingresso</Label>
                 <Input
@@ -863,7 +1065,7 @@ export function Orientacoes() {
                 </div>
               </div>
 
-              {/* Exame de Qualificação — Mestrado/Doutorado only */}
+              {/* Exame de Qualificação */}
               {needsQualificacao(form.curso) && (
                 <div className="col-span-2 flex items-center gap-2.5">
                   <Checkbox
@@ -879,29 +1081,6 @@ export function Orientacoes() {
                 </div>
               )}
             </div>
-
-            {/* Leituras */}
-            <div className="space-y-1.5">
-              <Label>Leituras Indicadas (uma por linha)</Label>
-              <Textarea
-                value={form.leituras_str}
-                onChange={e => setForm(f => ({ ...f, leituras_str: e.target.value }))}
-                placeholder="Ex: Breiman, L. (2001). Random Forests"
-                rows={3}
-              />
-            </div>
-
-            {/* Links de Documentos */}
-            <div className="space-y-1.5">
-              <Label>Links de Documentos (um por linha)</Label>
-              <Textarea
-                value={form.links_documentos_str}
-                onChange={e => setForm(f => ({ ...f, links_documentos_str: e.target.value }))}
-                placeholder="https://drive.google.com/..."
-                rows={2}
-              />
-            </div>
-
           </div>
 
           <DialogFooter>
