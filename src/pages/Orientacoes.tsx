@@ -24,6 +24,13 @@ import autoTable from 'jspdf-autotable'
 
 /* ─── Helpers ─────────────────────────────────────────────────────────── */
 
+/** Authenticated file URL: in-app FileViewer for GitHub mode, blob URL for demo. */
+function fileViewerUrl(anexo: Anexo): string {
+  if (!anexo.path) return anexo.url
+  const base = window.location.href.split('#')[0]
+  return `${base}#/file/${anexo.path}`
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -740,8 +747,7 @@ export function Orientacoes() {
                                     {r.anexo && (
                                       <div className="mt-2 flex items-center gap-2">
                                         <a
-                                          href={r.anexo.url}
-                                          download={r.anexo.name}
+                                          href={fileViewerUrl(r.anexo)}
                                           target="_blank"
                                           rel="noreferrer"
                                           className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 px-2 py-1 rounded-md transition-colors"
@@ -935,8 +941,7 @@ export function Orientacoes() {
                           {o.projeto_original && (
                             <TabsContent value="projeto">
                               <a
-                                href={o.projeto_original.url}
-                                download={o.projeto_original.name}
+                                href={fileViewerUrl(o.projeto_original)}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="flex items-center gap-2 p-2.5 rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors group"
