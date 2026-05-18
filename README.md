@@ -14,6 +14,10 @@ A persistência de dados ocorre diretamente no repositório GitHub do usuário p
 
 ---
 
+## :clapper: Tutorial
+
+<a href="https://www.loom.com/share/5b3e1c1d7e99467aa303bfd86a013ada"><img src="screenshots/tutorial_sucupiralab.png"></a>
+
 ## :gem: Módulos
 
 ### 1. Prestações de Contas
