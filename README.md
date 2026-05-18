@@ -181,6 +181,7 @@ attachments/           ← Anexos (base64 via API)
 
 ## Changelog
 
+```
 ### v0.5β — 7 de maio de 2026 (versão atual estável)
 
 #### Módulo Orientações: leituras, links e anexos de reunião
@@ -280,6 +281,7 @@ Modo demonstração sem necessidade de configuração
 Deploy estático via GitHub Actions → GitHub Pages (ativado por fork do repositório)
 
 Licença GPL-3.0
+```
 
 ---
 
