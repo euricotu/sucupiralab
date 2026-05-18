@@ -181,7 +181,23 @@ attachments/           ← Anexos (base64 via API)
 
 ## Changelog
 
-### v0.4β — 21 de abril de 2026 (versão atual estável)
+### v0.5β — 7 de maio de 2026 (versão atual estável)
+
+#### Módulo Orientações: leituras, links e anexos de reunião
+
+#### Novas funcionalidades
+
+Módulo Orientações — Leituras Indicadas e Links de Documentos migrados do formulário para abas próprias no card expandido, com adição e remoção inline (mesmo padrão da aba Tarefas)
+
+Módulo Orientações — cada anotação de reunião pode receber um arquivo anexado opcionalmente; o anexo é exibido como pílula clicável na timeline e pode ser removido individualmente sem apagar a anotação
+
+#### Correções
+
+Anexos em Orientações agora usam o FileViewer interno (rota `#/file/path`) em vez de URL raw do GitHub, evitando erro 404 em repositórios privados
+
+---
+
+### v0.4β — 21 de abril de 2026
 
 #### Refinamentos UX na topbar mobile
 
